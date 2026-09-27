@@ -1,0 +1,10 @@
+[project]
+name = "bda-ga1-lakehouse"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "pandas>=3.0.6",
+    "pyspark>=4.2.0",
+]
