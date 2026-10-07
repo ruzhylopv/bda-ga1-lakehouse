@@ -1,13 +1,36 @@
 [project]
 name = "bda-ga1-lakehouse"
 version = "0.1.0"
-description = "Add your description here"
+description = "TPC-H Lakehouse on Databricks (bronze / silver / gold) answering the Brand Manager business questions"
 readme = "README.md"
+license = "MIT"
 requires-python = ">=3.10"
-dependencies = [
-    "pandas>=3.0.6",
-    "pyspark>=4.2.0",
+# The pipeline itself runs on Databricks (serverless, Spark provided by the platform).
+# Locally we only need tooling: tests, dashboard generation, chart/slide rendering.
+dependencies = []
+
+[dependency-groups]
+dev = [
+    "duckdb>=1.1",
+    "sqlglot>=25.0",
+    "pytest>=8.0",
+    "pandas>=2.2",
+    "plotly>=5.20",
 ]
+docs = [
+    "pandas>=2.2",
+    "matplotlib>=3.8",
+    "python-pptx>=1.0",
+]
+
+[tool.uv]
+default-groups = ["dev"]
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["tests"]
+addopts = "-q"
 
 [tool.databricks.environment]
 environment_version = '6'

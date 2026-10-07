@@ -1,0 +1,1210 @@
+{
+  "datasets": [
+    {
+      "name": "kpi_brand32",
+      "displayName": "Brand#32 headline KPIs (Q1, Q2, Q4)",
+      "queryLines": [
+        "-- title: Brand#32 headline KPIs (Q1, Q2, Q4)\n",
+        "-- revenue = net of discount, excluding tax (see README \"Business definitions\")\n",
+        "WITH b32 AS (\n",
+        "    SELECT SUM(brand_revenue) AS brand_revenue,\n",
+        "           COUNT(DISTINCT category) AS category_count\n",
+        "    FROM bda_gold.brand_category_monthly\n",
+        "    WHERE brand = 'Brand#32'\n",
+        "),\n",
+        "b32_categories AS (\n",
+        "    SELECT SUM(m.brand_revenue) AS category_revenue\n",
+        "    FROM bda_gold.brand_category_monthly m\n",
+        "    WHERE m.category IN (\n",
+        "        SELECT DISTINCT category FROM bda_gold.brand_category_monthly WHERE brand = 'Brand#32'\n",
+        "    )\n",
+        "),\n",
+        "margin AS (\n",
+        "    SELECT COUNT(*) AS product_count,\n",
+        "           AVG(average_list_unit_margin) AS average_list_unit_margin\n",
+        "    FROM bda_gold.part_list_margin\n",
+        "    WHERE brand = 'Brand#32'\n",
+        "),\n",
+        "deviation AS (\n",
+        "    SELECT COUNT(*) AS deviating_product_count FROM bda_gold.price_deviation_products\n",
+        ")\n",
+        "SELECT\n",
+        "    ROUND(b32.brand_revenue, 2)                                    AS brand32_revenue,\n",
+        "    ROUND(b32.brand_revenue / c.category_revenue * 100, 2)         AS brand32_share_pct,\n",
+        "    b32.category_count                                             AS brand32_category_count,\n",
+        "    m.product_count                                                AS brand32_product_count,\n",
+        "    ROUND(m.average_list_unit_margin, 2)                           AS brand32_average_margin,\n",
+        "    d.deviating_product_count                                      AS deviating_product_count\n",
+        "FROM b32\n",
+        "CROSS JOIN b32_categories c\n",
+        "CROSS JOIN margin m\n",
+        "CROSS JOIN deviation d\n"
+      ]
+    },
+    {
+      "name": "q1_share_by_category",
+      "displayName": "Q1 - Brand#32 share within each category it belongs to",
+      "queryLines": [
+        "-- title: Q1 - Brand#32 share within each category it belongs to\n",
+        "-- fair_share_pct = 100 / number of brands in the category (equal split benchmark)\n",
+        "WITH b32 AS (\n",
+        "    SELECT category,\n",
+        "           SUM(brand_revenue)    AS brand32_revenue,\n",
+        "           SUM(category_revenue) AS category_revenue\n",
+        "    FROM bda_gold.brand_category_monthly\n",
+        "    WHERE brand = 'Brand#32'\n",
+        "    GROUP BY category\n",
+        "),\n",
+        "brands AS (\n",
+        "    SELECT category, COUNT(DISTINCT brand) AS brand_count\n",
+        "    FROM bda_gold.brand_category_monthly\n",
+        "    GROUP BY category\n",
+        ")\n",
+        "SELECT\n",
+        "    b.category,\n",
+        "    ROUND(b.brand32_revenue, 2)                                         AS brand32_revenue,\n",
+        "    ROUND(b.category_revenue, 2)                                        AS category_revenue,\n",
+        "    ROUND(b.brand32_revenue / NULLIF(b.category_revenue, 0) * 100, 2)   AS brand32_share_pct,\n",
+        "    ROUND(100.0 / n.brand_count, 2)                                     AS fair_share_pct\n",
+        "FROM b32 b\n",
+        "JOIN brands n ON b.category = n.category\n",
+        "ORDER BY brand32_share_pct DESC\n"
+      ]
+    },
+    {
+      "name": "q2_margin_by_brand",
+      "displayName": "Q2 - average list-price margin per brand (Brand#32 highlighted)",
+      "queryLines": [
+        "-- title: Q2 - average list-price margin per brand (Brand#32 highlighted)\n",
+        "-- per product: average over supplier offers; per brand: equal-weight average over products\n",
+        "SELECT\n",
+        "    brand,\n",
+        "    COUNT(*)                                  AS product_count,\n",
+        "    COUNT(average_list_unit_margin)           AS products_with_known_margin,\n",
+        "    ROUND(AVG(average_list_unit_margin), 2)   AS average_list_unit_margin,\n",
+        "    CASE WHEN brand = 'Brand#32' THEN 'Brand#32' ELSE 'Other brands' END AS highlight\n",
+        "FROM bda_gold.part_list_margin\n",
+        "GROUP BY brand\n",
+        "ORDER BY average_list_unit_margin DESC\n"
+      ]
+    },
+    {
+      "name": "q3_category_leaders",
+      "displayName": "Q3 - category leader (largest all-time share) per category",
+      "queryLines": [
+        "-- title: Q3 - category leader (largest all-time share) per category\n",
+        "WITH totals AS (\n",
+        "    SELECT category, brand, SUM(brand_revenue) AS brand_revenue\n",
+        "    FROM bda_gold.brand_category_monthly\n",
+        "    GROUP BY category, brand\n",
+        "),\n",
+        "shares AS (\n",
+        "    SELECT category, brand,\n",
+        "           brand_revenue / NULLIF(SUM(brand_revenue) OVER (PARTITION BY category), 0) AS market_share\n",
+        "    FROM totals\n",
+        "),\n",
+        "ranked AS (\n",
+        "    SELECT *, RANK() OVER (PARTITION BY category ORDER BY market_share DESC) AS category_rank\n",
+        "    FROM shares\n",
+        ")\n",
+        "SELECT\n",
+        "    category,\n",
+        "    brand,\n",
+        "    ROUND(market_share * 100, 4) AS market_share_pct,\n",
+        "    CONCAT(brand, ' / ', category) AS label\n",
+        "FROM ranked\n",
+        "WHERE category_rank = 1\n",
+        "ORDER BY market_share_pct DESC\n",
+        "LIMIT 15\n"
+      ]
+    },
+    {
+      "name": "q3_leader_stability",
+      "displayName": "Q3 - is the overall leader's share stable? (monthly share and rank, complete months only)",
+      "queryLines": [
+        "-- title: Q3 - is the overall leader's share stable? (monthly share and rank, complete months only)\n",
+        "-- boundary months (first and last) are excluded as potentially incomplete, same rule as 02_gold_layer\n",
+        "WITH totals AS (\n",
+        "    SELECT category, brand, SUM(brand_revenue) AS brand_revenue\n",
+        "    FROM bda_gold.brand_category_monthly\n",
+        "    GROUP BY category, brand\n",
+        "),\n",
+        "shares AS (\n",
+        "    SELECT category, brand,\n",
+        "           brand_revenue / NULLIF(SUM(brand_revenue) OVER (PARTITION BY category), 0) AS market_share\n",
+        "    FROM totals\n",
+        "),\n",
+        "leader AS (\n",
+        "    SELECT category, brand\n",
+        "    FROM shares\n",
+        "    ORDER BY market_share DESC, category, brand\n",
+        "    LIMIT 1\n",
+        "),\n",
+        "bounds AS (\n",
+        "    SELECT MIN(month_start) AS min_month, MAX(month_start) AS max_month\n",
+        "    FROM bda_gold.brand_category_monthly\n",
+        "),\n",
+        "monthly AS (\n",
+        "    SELECT m.month_start, m.category, m.brand, m.market_share,\n",
+        "           RANK() OVER (PARTITION BY m.month_start, m.category ORDER BY m.market_share DESC) AS monthly_rank\n",
+        "    FROM bda_gold.brand_category_monthly m\n",
+        "    JOIN leader l ON m.category = l.category\n",
+        "    CROSS JOIN bounds b\n",
+        "    WHERE m.market_share IS NOT NULL\n",
+        "      AND m.month_start > b.min_month\n",
+        "      AND m.month_start < b.max_month\n",
+        ")\n",
+        "SELECT\n",
+        "    m.month_start,\n",
+        "    m.brand,\n",
+        "    m.category,\n",
+        "    ROUND(m.market_share * 100, 2) AS market_share_pct,\n",
+        "    m.monthly_rank\n",
+        "FROM monthly m\n",
+        "JOIN leader l ON m.brand = l.brand\n",
+        "ORDER BY m.month_start\n"
+      ]
+    },
+    {
+      "name": "q4_price_deviation_distribution",
+      "displayName": "Q4 - distribution of sale-line price deviation vs. the 15% threshold",
+      "queryLines": [
+        "-- title: Q4 - distribution of sale-line price deviation vs. the 15% threshold\n",
+        "-- deviation = |actual unit price - list price| / list price, bucketed by whole percent\n",
+        "SELECT\n",
+        "    CAST(FLOOR(price_deviation_ratio * 100) AS INT) AS deviation_pct_bucket,\n",
+        "    COUNT(*)                                        AS sale_lines,\n",
+        "    CASE WHEN price_deviation_ratio > 0.15 THEN 'above 15% threshold'\n",
+        "         ELSE 'within threshold' END                AS threshold_status\n",
+        "FROM bda_gold.brand_sales\n",
+        "GROUP BY 1, 3\n",
+        "ORDER BY deviation_pct_bucket\n"
+      ]
+    },
+    {
+      "name": "monitoring_brand32_trend",
+      "displayName": "Monitoring - Brand#32 revenue and share across its categories, complete months",
+      "queryLines": [
+        "-- title: Monitoring - Brand#32 revenue and share across its categories, complete months\n",
+        "SELECT\n",
+        "    month_start,\n",
+        "    ROUND(SUM(brand_revenue), 2)                                    AS brand32_revenue,\n",
+        "    ROUND(SUM(brand_revenue) / NULLIF(SUM(category_revenue), 0) * 100, 3) AS brand32_share_pct\n",
+        "FROM bda_gold.brand_monitoring\n",
+        "WHERE brand = 'Brand#32'\n",
+        "  AND is_complete_month\n",
+        "GROUP BY month_start\n",
+        "ORDER BY month_start\n"
+      ]
+    },
+    {
+      "name": "monitoring_latest_change",
+      "displayName": "Monitoring - Brand#32 share change in the latest comparable month vs. the -5 pp alert threshold",
+      "queryLines": [
+        "-- title: Monitoring - Brand#32 share change in the latest comparable month vs. the -5 pp alert threshold\n",
+        "SELECT\n",
+        "    month_start,\n",
+        "    category,\n",
+        "    ROUND(market_share * 100, 2)              AS market_share_pct,\n",
+        "    ROUND(share_change_percentage_points, 2)  AS share_change_pp,\n",
+        "    -5.0                                      AS alert_threshold_pp,\n",
+        "    CASE WHEN share_change_percentage_points <= -5 THEN 'ALERT' ELSE 'ok' END AS alert_status\n",
+        "FROM bda_gold.brand_monitoring\n",
+        "WHERE brand = 'Brand#32'\n",
+        "  AND is_comparable_month\n",
+        "  AND month_start = (\n",
+        "      SELECT MAX(month_start) FROM bda_gold.brand_monitoring\n",
+        "      WHERE brand = 'Brand#32' AND is_comparable_month\n",
+        "  )\n",
+        "ORDER BY share_change_pp\n"
+      ]
+    },
+    {
+      "name": "monitoring_change_explanation",
+      "displayName": "Monitoring - why did the share move? brand effect vs. category effect (10 largest moves)",
+      "queryLines": [
+        "-- title: Monitoring - why did the share move? brand effect vs. category effect (10 largest moves)\n",
+        "SELECT\n",
+        "    month_start,\n",
+        "    category,\n",
+        "    ROUND(brand_revenue_effect_pp, 3)    AS brand_effect_pp,\n",
+        "    ROUND(category_revenue_effect_pp, 3) AS category_effect_pp,\n",
+        "    ROUND(actual_share_change_pp, 3)     AS actual_change_pp\n",
+        "FROM bda_gold.brand_share_change_explanation\n",
+        "WHERE brand = 'Brand#32'\n",
+        "  AND month_start = (\n",
+        "      SELECT MAX(month_start) FROM bda_gold.brand_share_change_explanation WHERE brand = 'Brand#32'\n",
+        "  )\n",
+        "ORDER BY ABS(actual_share_change_pp) DESC\n",
+        "LIMIT 10\n"
+      ]
+    },
+    {
+      "name": "alert_status",
+      "displayName": "Alert - Brand#32 share drop >= 5 pp in the latest complete month (same logic as sql/brand_share_alert.sql)",
+      "queryLines": [
+        "-- title: Alert - Brand#32 share drop >= 5 pp in the latest complete month (same logic as sql/brand_share_alert.sql)\n",
+        "WITH latest AS (\n",
+        "    SELECT MAX(month_start) AS month_start\n",
+        "    FROM bda_gold.brand_monitoring WHERE is_complete_month\n",
+        ")\n",
+        "SELECT\n",
+        "    l.month_start,\n",
+        "    COUNT(CASE WHEN m.is_comparable_month AND m.share_change_percentage_points <= -5 THEN 1 END) AS affected_category_count,\n",
+        "    COUNT(CASE WHEN NOT m.is_comparable_month THEN 1 END) AS unavailable_category_count,\n",
+        "    COUNT(m.category) AS monitored_category_count\n",
+        "FROM latest l\n",
+        "LEFT JOIN bda_gold.brand_monitoring m\n",
+        "    ON m.month_start = l.month_start AND m.brand = 'Brand#32'\n",
+        "GROUP BY l.month_start\n"
+      ]
+    },
+    {
+      "name": "validation_summary",
+      "displayName": "Data quality - latest validation run, checks passed per phase",
+      "queryLines": [
+        "-- title: Data quality - latest validation run, checks passed per phase\n",
+        "WITH latest AS (\n",
+        "    SELECT run_id FROM bda_gold.validation_results\n",
+        "    ORDER BY checked_at DESC\n",
+        "    LIMIT 1\n",
+        ")\n",
+        "SELECT\n",
+        "    v.phase,\n",
+        "    COUNT(*)                                        AS checks,\n",
+        "    SUM(CASE WHEN v.passed THEN 1 ELSE 0 END)       AS passed,\n",
+        "    SUM(CASE WHEN NOT v.passed THEN 1 ELSE 0 END)   AS failed,\n",
+        "    SUM(CASE WHEN NOT v.passed AND v.is_critical THEN 1 ELSE 0 END) AS critical_failures\n",
+        "FROM bda_gold.validation_results v\n",
+        "JOIN latest l ON v.run_id = l.run_id\n",
+        "GROUP BY v.phase\n",
+        "ORDER BY CASE v.phase WHEN 'bronze' THEN 1 WHEN 'silver' THEN 2\n",
+        "                      WHEN 'reconciliation' THEN 3 WHEN 'gold' THEN 4 ELSE 5 END\n"
+      ]
+    }
+  ],
+  "pages": [
+    {
+      "name": "brand32",
+      "displayName": "Brand#32 (Q1-Q2)",
+      "layout": [
+        {
+          "widget": {
+            "name": "title_brand",
+            "multilineTextboxSpec": {
+              "lines": [
+                "# Brand Manager: Brand#32",
+                "Revenue = net of discount, excl. tax. Source: `bda_gold` (Gold layer)."
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 6,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "kpi_revenue",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "kpi_brand32",
+                  "fields": [
+                    {
+                      "name": "brand32_revenue",
+                      "expression": "`brand32_revenue`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "brand32_revenue",
+                  "displayName": "Q1 Brand#32 net revenue"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Q1 Brand#32 net revenue"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 2,
+            "width": 2,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "kpi_share",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "kpi_brand32",
+                  "fields": [
+                    {
+                      "name": "brand32_share_pct",
+                      "expression": "`brand32_share_pct`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "brand32_share_pct",
+                  "displayName": "Q1 Share across its categories, %"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Q1 Share across its categories, %"
+              }
+            }
+          },
+          "position": {
+            "x": 2,
+            "y": 2,
+            "width": 2,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "kpi_margin",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "kpi_brand32",
+                  "fields": [
+                    {
+                      "name": "brand32_average_margin",
+                      "expression": "`brand32_average_margin`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "brand32_average_margin",
+                  "displayName": "Q2 Average list-price margin"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Q2 Average list-price margin"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 2,
+            "width": 2,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "q1_bar",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "q1_share_by_category",
+                  "fields": [
+                    {
+                      "name": "category",
+                      "expression": "`category`"
+                    },
+                    {
+                      "name": "brand32_share_pct",
+                      "expression": "`brand32_share_pct`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "category",
+                  "scale": {
+                    "type": "categorical",
+                    "sort": {
+                      "by": "y-reversed"
+                    }
+                  },
+                  "displayName": "category"
+                },
+                "y": {
+                  "fieldName": "brand32_share_pct",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "brand32_share_pct"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Q1 Brand#32 share by category, % (fair share = 100 / brands)"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 5,
+            "width": 6,
+            "height": 7
+          }
+        },
+        {
+          "widget": {
+            "name": "q2_bar",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "q2_margin_by_brand",
+                  "fields": [
+                    {
+                      "name": "brand",
+                      "expression": "`brand`"
+                    },
+                    {
+                      "name": "average_list_unit_margin",
+                      "expression": "`average_list_unit_margin`"
+                    },
+                    {
+                      "name": "highlight",
+                      "expression": "`highlight`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "brand",
+                  "scale": {
+                    "type": "categorical",
+                    "sort": {
+                      "by": "y-reversed"
+                    }
+                  },
+                  "displayName": "brand"
+                },
+                "y": {
+                  "fieldName": "average_list_unit_margin",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "average_list_unit_margin"
+                },
+                "color": {
+                  "fieldName": "highlight",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "highlight"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Q2 Average list-price margin by brand"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 12,
+            "width": 6,
+            "height": 6
+          }
+        }
+      ]
+    },
+    {
+      "name": "market",
+      "displayName": "Market (Q3-Q4)",
+      "layout": [
+        {
+          "widget": {
+            "name": "title_market",
+            "multilineTextboxSpec": {
+              "lines": [
+                "# Market: category leaders and price deviation"
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 6,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "q3_leaders",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "q3_category_leaders",
+                  "fields": [
+                    {
+                      "name": "label",
+                      "expression": "`label`"
+                    },
+                    {
+                      "name": "market_share_pct",
+                      "expression": "`market_share_pct`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "label",
+                  "scale": {
+                    "type": "categorical",
+                    "sort": {
+                      "by": "y-reversed"
+                    }
+                  },
+                  "displayName": "label"
+                },
+                "y": {
+                  "fieldName": "market_share_pct",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "market_share_pct"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Q3 Category leaders by all-time share, % (top 15)"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 1,
+            "width": 6,
+            "height": 7
+          }
+        },
+        {
+          "widget": {
+            "name": "q3_stability",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "q3_leader_stability",
+                  "fields": [
+                    {
+                      "name": "month_start",
+                      "expression": "`month_start`"
+                    },
+                    {
+                      "name": "market_share_pct",
+                      "expression": "`market_share_pct`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "month_start",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "month_start"
+                },
+                "y": {
+                  "fieldName": "market_share_pct",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "market_share_pct"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Q3 Is the overall leader stable? Monthly share, %"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 8,
+            "width": 3,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "q3_rank",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "q3_leader_stability",
+                  "fields": [
+                    {
+                      "name": "month_start",
+                      "expression": "`month_start`"
+                    },
+                    {
+                      "name": "monthly_rank",
+                      "expression": "`monthly_rank`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "month_start",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "month_start"
+                },
+                "y": {
+                  "fieldName": "monthly_rank",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "monthly_rank"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Q3 Leader's monthly rank in its category (1 = top)"
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 8,
+            "width": 3,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "kpi_deviation",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "kpi_brand32",
+                  "fields": [
+                    {
+                      "name": "deviating_product_count",
+                      "expression": "`deviating_product_count`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "deviating_product_count",
+                  "displayName": "Q4 Products with deviation > 15%"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Q4 Products with deviation > 15%"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 14,
+            "width": 2,
+            "height": 4
+          }
+        },
+        {
+          "widget": {
+            "name": "q4_hist",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "q4_price_deviation_distribution",
+                  "fields": [
+                    {
+                      "name": "deviation_pct_bucket",
+                      "expression": "`deviation_pct_bucket`"
+                    },
+                    {
+                      "name": "sale_lines",
+                      "expression": "`sale_lines`"
+                    },
+                    {
+                      "name": "threshold_status",
+                      "expression": "`threshold_status`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "deviation_pct_bucket",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "deviation_pct_bucket"
+                },
+                "y": {
+                  "fieldName": "sale_lines",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "sale_lines"
+                },
+                "color": {
+                  "fieldName": "threshold_status",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "threshold_status"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Q4 Sale lines by price deviation, % (threshold 15%)"
+              }
+            }
+          },
+          "position": {
+            "x": 2,
+            "y": 14,
+            "width": 4,
+            "height": 6
+          }
+        }
+      ]
+    },
+    {
+      "name": "monitoring",
+      "displayName": "Monitoring & quality",
+      "layout": [
+        {
+          "widget": {
+            "name": "title_monitor",
+            "multilineTextboxSpec": {
+              "lines": [
+                "# Monitoring, alerting and data quality",
+                "Alert: Brand#32 share in a category drops >= 5 pp vs. previous complete month."
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 6,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "alert_count",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "alert_status",
+                  "fields": [
+                    {
+                      "name": "affected_category_count",
+                      "expression": "`affected_category_count`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "affected_category_count",
+                  "displayName": "Alert: categories with drop >= 5 pp"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Alert: categories with drop >= 5 pp"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 2,
+            "width": 2,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "alert_monitored",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "alert_status",
+                  "fields": [
+                    {
+                      "name": "monitored_category_count",
+                      "expression": "`monitored_category_count`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "monitored_category_count",
+                  "displayName": "Categories monitored"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Categories monitored"
+              }
+            }
+          },
+          "position": {
+            "x": 2,
+            "y": 2,
+            "width": 2,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "alert_unavailable",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "alert_status",
+                  "fields": [
+                    {
+                      "name": "unavailable_category_count",
+                      "expression": "`unavailable_category_count`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "unavailable_category_count",
+                  "displayName": "Categories without comparison"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Categories without comparison"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 2,
+            "width": 2,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "trend",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "monitoring_brand32_trend",
+                  "fields": [
+                    {
+                      "name": "month_start",
+                      "expression": "`month_start`"
+                    },
+                    {
+                      "name": "brand32_share_pct",
+                      "expression": "`brand32_share_pct`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "month_start",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "month_start"
+                },
+                "y": {
+                  "fieldName": "brand32_share_pct",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "brand32_share_pct"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Brand#32 share across its categories, % (complete months)"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 5,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "latest",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "monitoring_latest_change",
+                  "fields": [
+                    {
+                      "name": "category",
+                      "expression": "`category`"
+                    },
+                    {
+                      "name": "share_change_pp",
+                      "expression": "`share_change_pp`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "category",
+                  "scale": {
+                    "type": "categorical",
+                    "sort": {
+                      "by": "y"
+                    }
+                  },
+                  "displayName": "category"
+                },
+                "y": {
+                  "fieldName": "share_change_pp",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "share_change_pp"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Latest comparable month: share change by category, pp (alert at -5)"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 11,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "validation",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "validation_summary",
+                  "fields": [
+                    {
+                      "name": "phase",
+                      "expression": "`phase`"
+                    },
+                    {
+                      "name": "passed",
+                      "expression": "`passed`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "phase",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "phase"
+                },
+                "y": {
+                  "fieldName": "passed",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "passed"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Latest validation run: checks passed per phase"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 17,
+            "width": 3,
+            "height": 5
+          }
+        },
+        {
+          "widget": {
+            "name": "validation_failed",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "validation_summary",
+                  "fields": [
+                    {
+                      "name": "phase",
+                      "expression": "`phase`"
+                    },
+                    {
+                      "name": "failed",
+                      "expression": "`failed`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "phase",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "phase"
+                },
+                "y": {
+                  "fieldName": "failed",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "failed"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Latest validation run: checks failed per phase"
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 17,
+            "width": 3,
+            "height": 5
+          }
+        }
+      ]
+    }
+  ]
+}
