@@ -143,11 +143,11 @@ tests/                                 local test suite
 
 ## Team
 
-| Member | Role | Responsibilities |
-|---|---|---|
-| Member 1 | Data Engineer | Bronze (as-is + metadata) and Silver (normalized, quality-enforced) layers, Silver ER diagram, Jobs/Pipelines |
-| Member 2 | Analytics Engineer | Gold layer for the Brand Manager questions, validation rules across all layers, monitoring and alerting |
-| Member 3 | BI Analyst / DevOps | Public repo with uv, README, portability; visualizations (notebook + dashboard); presentation and demo |
+| Member | Responsibilities |
+|---|---|
+| Pavlo Ruzhylo | Bronze (as-is + metadata) and Silver (normalized, quality-enforced) layers, Silver ER diagram, Jobs/Pipelines |
+| Oleksii Lasiichuk | Gold layer for the Brand Manager questions, validation rules across all layers, monitoring and alerting |
+| Ivan Maksymchuk | Public repo with uv, README, portability; visualizations (notebook + dashboard); presentation and demo |
 
 ## Challenges
 
