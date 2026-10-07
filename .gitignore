@@ -219,3 +219,12 @@ __marimo__/
 
 
 group_assignment_1.pdf
+# local exports from Databricks (versioned copies live in docs/run-outputs)
+with outputs/
+
+# slides are shared separately, not versioned
+presentation/
+
+# local tooling and run artifacts, not versioned
+docs/
+scripts/
