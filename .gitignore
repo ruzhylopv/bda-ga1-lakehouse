@@ -3,6 +3,10 @@ __pycache__/
 *.py[codz]
 *$py.class
 
+output/
+tmp/
+*.pdf
+
 # C extensions
 *.so
 
